@@ -29,12 +29,14 @@ import {
   Animated,
   Dimensions,
   ActivityIndicator,
+  Modal,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import {
   Camera,
   useCameraDevice,
   useCameraPermission,
+  useCameraFormat,
 } from 'react-native-vision-camera';
 import RNFS from 'react-native-fs';
 import { useMarkerDetection } from './src/hooks/useMarkerDetection';
@@ -44,9 +46,9 @@ import type { DetectionResult } from './src/native/MarkerDetector';
 // Constants
 // ─────────────────────────────────────────────────────────────────────────────
 const MAX_MARKERS = 20;
-const CAPTURE_INTERVAL_MS = 600; // capture frame every 600 ms
+const CAPTURE_INTERVAL_MS = 400; // faster capture = more detection attempts
 const { width: SCREEN_W } = Dimensions.get('window');
-const CARD_SIZE = (SCREEN_W - 40) / 4; // 4 columns with padding
+const CARD_SIZE = (SCREEN_W - 40) / 4;
 
 interface MarkerRecord extends DetectionResult {
   timestamp: number;
@@ -93,9 +95,54 @@ function CornerBrackets() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Marker card (result grid item)
+// Marker detail modal
 // ─────────────────────────────────────────────────────────────────────────────
-function MarkerCard({ item }: { item: MarkerRecord }) {
+function MarkerDetailModal({
+  item,
+  onClose,
+}: {
+  item: MarkerRecord | null;
+  onClose: () => void;
+}) {
+  if (!item) return null;
+  const binary = item.id.toString(2).padStart(24, '0');
+  const time   = new Date(item.timestamp).toLocaleTimeString();
+  return (
+    <Modal visible animationType="fade" transparent onRequestClose={onClose}>
+      <View style={styles.modalBackdrop}>
+        <View style={styles.modalCard}>
+          <Text style={styles.modalTitle}>Marker #{item.index} — ID {item.id}</Text>
+          <Image
+            source={{ uri: `data:image/png;base64,${item.image}` }}
+            style={styles.modalImage}
+            resizeMode="contain"
+          />
+          <View style={styles.modalMeta}>
+            <Text style={styles.modalLabel}>Binary (24-bit)</Text>
+            <Text style={styles.modalBinary}>
+              {binary.match(/.{1,6}/g)?.join('  ')}
+            </Text>
+            <Text style={styles.modalLabel}>Decimal ID</Text>
+            <Text style={styles.modalValue}>{item.id}</Text>
+            <Text style={styles.modalLabel}>Detected at</Text>
+            <Text style={styles.modalValue}>{time}</Text>
+          </View>
+          <TouchableOpacity style={styles.modalClose} onPress={onClose}>
+            <Text style={styles.modalCloseText}>✕  Close</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
+function MarkerCard({
+  item,
+  onPress,
+}: {
+  item: MarkerRecord;
+  onPress: (item: MarkerRecord) => void;
+}) {
   const fadeAnim = useRef(new Animated.Value(0)).current;
   useEffect(() => {
     Animated.timing(fadeAnim, { toValue: 1, duration: 400, useNativeDriver: true }).start();
@@ -103,15 +150,17 @@ function MarkerCard({ item }: { item: MarkerRecord }) {
 
   return (
     <Animated.View style={[styles.card, { opacity: fadeAnim }]}>
-      <Image
-        source={{ uri: `data:image/png;base64,${item.image}` }}
-        style={styles.cardImage}
-        resizeMode="contain"
-      />
-      <View style={styles.cardBadge}>
-        <Text style={styles.cardIndex}>#{item.index}</Text>
-      </View>
-      <Text style={styles.cardId}>ID {item.id}</Text>
+      <TouchableOpacity onPress={() => onPress(item)} activeOpacity={0.75}>
+        <Image
+          source={{ uri: `data:image/png;base64,${item.image}` }}
+          style={styles.cardImage}
+          resizeMode="contain"
+        />
+        <View style={styles.cardBadge}>
+          <Text style={styles.cardIndex}>#{item.index}</Text>
+        </View>
+        <Text style={styles.cardId}>ID {item.id}</Text>
+      </TouchableOpacity>
     </Animated.View>
   );
 }
@@ -120,11 +169,12 @@ function MarkerCard({ item }: { item: MarkerRecord }) {
 // Main App
 // ─────────────────────────────────────────────────────────────────────────────
 export default function App() {
-  const [markers, setMarkers] = useState<MarkerRecord[]>([]);
+  const [markers,    setMarkers]    = useState<MarkerRecord[]>([]);
   const [isScanning, setIsScanning] = useState(true);
   const [isProcessing, setIsProcessing] = useState(false);
   const [frameCount, setFrameCount] = useState(0);
   const [lastStatus, setLastStatus] = useState('Waiting...');
+  const [selectedMarker, setSelectedMarker] = useState<MarkerRecord | null>(null);
 
   const detectedIds = useRef(new Set<number>());
   const cameraRef = useRef<InstanceType<typeof Camera>>(null);
@@ -133,6 +183,11 @@ export default function App() {
   // ── Camera setup ────────────────────────────────────────────────────────
   const { hasPermission, requestPermission } = useCameraPermission();
   const device = useCameraDevice('back');
+
+  // Select a format with photo resolution between 2000-3000px (assignment requirement)
+  const format = useCameraFormat(device, [
+    { photoResolution: { width: 2500, height: 2500 } },
+  ]);
 
   useEffect(() => {
     if (!hasPermission) requestPermission();
@@ -266,6 +321,7 @@ export default function App() {
             device={device}
             isActive={isScanning}
             photo
+            format={format}
           />
 
           {/* Dark vignette overlay */}
@@ -293,16 +349,34 @@ export default function App() {
           </Text>
         </View>
       ) : (
-        /* ── Results grid ── */
-        <FlatList
-          data={markers}
-          keyExtractor={item => item.id.toString()}
-          numColumns={4}
-          contentContainerStyle={styles.grid}
-          showsVerticalScrollIndicator={false}
-          renderItem={({ item }) => <MarkerCard item={item} />}
-        />
+        <View style={{ flex: 1 }}>
+          {markers.length === 0 ? (
+            <View style={styles.centered}>
+              <Text style={{ color: '#666', fontSize: 16, textAlign: 'center', paddingHorizontal: 30 }}>
+                No markers detected yet.{'\n'}Resume scanning to find markers.
+              </Text>
+            </View>
+          ) : (
+            <FlatList
+              data={markers}
+              keyExtractor={item => item.id.toString()}
+              numColumns={4}
+              contentContainerStyle={styles.grid}
+              showsVerticalScrollIndicator={false}
+              renderItem={({ item }) => (
+                <MarkerCard item={item} onPress={setSelectedMarker} />
+              )}
+            />
+          )}
+        </View>
       )}
+
+
+      {/* ── Marker detail modal ── */}
+      <MarkerDetailModal
+        item={selectedMarker}
+        onClose={() => setSelectedMarker(null)}
+      />
 
       {/* ── Bottom controls ── */}
       <View style={styles.controls}>
@@ -495,4 +569,74 @@ const styles = StyleSheet.create({
     borderRadius: 10,
   },
   permBtnText: { color: '#000', fontWeight: '700', fontSize: 15 },
+
+  // Modal
+  modalBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.85)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  modalCard: {
+    backgroundColor: '#151515',
+    borderRadius: 18,
+    width: '100%',
+    maxWidth: 360,
+    padding: 20,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#252525',
+    gap: 14,
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#fff',
+    letterSpacing: 0.3,
+  },
+  modalImage: {
+    width: 260,
+    height: 260,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#252525',
+  },
+  modalMeta: {
+    width: '100%',
+    gap: 4,
+  },
+  modalLabel: {
+    fontSize: 11,
+    color: '#555',
+    textTransform: 'uppercase',
+    letterSpacing: 0.8,
+    marginTop: 8,
+  },
+  modalBinary: {
+    fontSize: 13,
+    color: GREEN,
+    fontFamily: 'monospace',
+    letterSpacing: 1,
+  },
+  modalValue: {
+    fontSize: 16,
+    color: '#fff',
+    fontWeight: '600',
+  },
+  modalClose: {
+    width: '100%',
+    paddingVertical: 13,
+    borderRadius: 12,
+    backgroundColor: '#1c1c1c',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#333',
+    marginTop: 4,
+  },
+  modalCloseText: {
+    color: '#aaa',
+    fontSize: 15,
+    fontWeight: '600',
+  },
 });

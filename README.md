@@ -1,55 +1,64 @@
-# Custom Visual Marker System
+# Custom Marker Detection — Android App
 
-A custom square marker system for computer vision detection with React Native Android app.
-
-## Features
-
-- **5x5 grid** with 24 data bits
-- **Orientation detection** via diagonal triangle
-- **60% white cells** for better detection
-- **16,777,216** possible unique markers
-- **High resolution** output (600x600 pixels)
-
-## Quick Start
-
-### Generate Markers
-
-```bash
-python marker_generator.py
-```
-
-This creates 20 unique markers in the `markers/` directory.
-
-### Marker Structure
-
-```
-┌─────────────────────────────────┐
-│  ┌───┬───┬───┬───┬───┐         │
-│  │ O │ D1│ D2│ D3│ D4│         │
-│  ├───┼───┼───┼───┼───┤         │
-│  │ D5│ D6│ D7│ D8│ D9│         │
-│  ├───┼───┼───┼───┼───┤         │
-│  │D10│D11│D12│D13│D14│         │
-│  ├───┼───┼───┼───┼───┤         │
-│  │D15│D16│D17│D18│D19│         │
-│  ├───┼───┼───┼───┼───┤         │
-│  │D20│D21│D22│D23│D24│         │
-│  └───┴───┴───┴───┴───┘         │
-└─────────────────────────────────┘
-```
-
-- **O**: Orientation marker (diagonal triangle)
-- **D1-D24**: Data cells (24 bits)
+React Native Android app that detects custom visual markers in real-time using OpenCV.
 
 ## Requirements
+- Android device with camera (Android 8+)
+- Node.js 20+, JDK 17+, Android SDK
 
-- Python 3.7+
-- OpenCV (`pip install opencv-python numpy`)
+## Setup
 
-## React Native App
+```bash
+# 1. Clone
+git clone <repo-url>
+cd "Marker Design"
 
-See `react_native_app/` directory for the Android app implementation.
+# 2. Install JS deps
+cd MarkerDetector
+npm install
 
-## License
+# 3. Start Metro
+npx react-native start --reset-cache
 
-MIT
+# 4. Build & install (device connected via USB with USB debugging on)
+adb reverse tcp:8081 tcp:8081
+npx react-native run-android
+```
+
+## Project Structure
+```
+Marker Design/
+├── marker_generator.py      # Generates 20 marker PNG files
+├── marker_detector.py       # Python reference detector
+├── markers/                 # 20 generated marker images
+├── APPROACH.md              # Technical approach document
+└── MarkerDetector/          # React Native Android app
+    ├── App.tsx              # Main UI
+    ├── src/
+    │   ├── hooks/useMarkerDetection.ts
+    │   └── native/MarkerDetector.ts
+    └── android/app/src/main/java/com/markerdetector/
+        ├── MarkerDetectorModule.kt   # OpenCV detection pipeline
+        └── MarkerDetectorPackage.kt
+```
+
+## Generating Markers
+
+```bash
+pip install opencv-python numpy
+python marker_generator.py
+# Creates markers/marker_000001.png through marker_000020.png
+```
+
+## Marker Design
+
+5×5 grid, black border, diagonal orientation triangle in top-left cell.
+24 data bits (≥ 62.5% white area). See `APPROACH.md` for full specification.
+
+## Building APK
+
+```bash
+cd MarkerDetector/android
+.\gradlew assembleRelease
+# APK → android/app/build/outputs/apk/release/app-release-unsigned.apk
+```
