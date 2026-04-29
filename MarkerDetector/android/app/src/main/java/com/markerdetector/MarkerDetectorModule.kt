@@ -127,6 +127,7 @@ class MarkerDetectorModule(reactContext: ReactApplicationContext) :
         val (markerId, conf) = decodeGrid(aligned)
         Log.d(TAG, "id=$markerId conf=${"%.2f".format(conf)}")
         if (markerId <= 0 || markerId > 20) return null
+        if (conf < 0.60) { Log.d(TAG, "low confidence ${"%.2f".format(conf)}, skipped"); return null }
 
         // Encode 300x300 result PNG
         val out = Mat()

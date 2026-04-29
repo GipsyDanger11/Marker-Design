@@ -196,6 +196,11 @@ export default function App() {
   // ── Detection callback (memoised, deduplication inside) ─────────────────
   const handleDetection = useCallback(
     (result: DetectionResult) => {
+      // Reject low-confidence detections (garbage)
+      if ((result as any).confidence !== undefined && (result as any).confidence < 0.6) {
+        setLastStatus(`Low confidence ${((result as any).confidence * 100).toFixed(0)}% — skipped`);
+        return;
+      }
       if (detectedIds.current.has(result.id)) {
         setLastStatus(`Duplicate ID ${result.id} skipped`);
         return;
